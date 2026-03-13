@@ -1,0 +1,42 @@
+{
+  "name": "@striderlabs/mcp-rover",
+  "version": "1.0.0",
+  "description": "Model Context Protocol connector for Rover pet services",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mcp-rover": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "pack": "npm run build && npm pack"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "rover",
+    "pet-services",
+    "pet-sitting",
+    "dog-walking"
+  ],
+  "author": "Strider Labs",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
