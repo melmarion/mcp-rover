@@ -131,6 +131,7 @@ function analyzeConversation(messages, ownerName) {
         mentionedMeetGreet,
         messageCount: ownerMessages.length,
         stage,
+        petProfiles: [],
     };
 }
 // ── Response generation ──────────────────────────────────────────────────────
@@ -345,6 +346,9 @@ KNOWN CONTEXT:
 - Owner name: ${ctx.ownerName}
 - Pet name(s): ${ctx.petNames.length > 0 ? ctx.petNames.join(", ") : "not yet known"}
 - Pet type: ${ctx.petType}
+${ctx.petProfiles.length > 0 ? `- Pet profile details (from Rover, owner may NOT have mentioned these — use naturally, don't list them back):
+${ctx.petProfiles.map((p) => `  - ${p.name}: ${[p.species, p.breed, p.age, p.weight, p.temperament, p.specialNeeds].filter(Boolean).join(", ")}`).join("\n")}
+  IMPORTANT: Using the pet's name when the owner didn't say it reads as "she actually looked at my profile." This is a major trust signal. But do NOT recite their profile back at them — just use the name naturally and let breed/age/temperament inform your tone.` : ""}
 - Dates: ${ctx.dates || "not yet discussed"}
 - Long-term stay: ${ctx.isLongTerm ? "yes" : "no"}
 - Multiple pets: ${ctx.isMultiPet ? "yes" : "no"}

@@ -27,7 +27,7 @@
  *
  * No meet & greets. Marion is not in town. Reframe as method, not limitation.
  */
-import { ThreadMessage } from "./browser.js";
+import { ThreadMessage, PetDetail } from "./browser.js";
 export type ConversationStage = "first_contact" | "rapport_build" | "commitment" | "pricing_play" | "close";
 export interface OwnerContext {
     ownerName: string;
@@ -44,6 +44,7 @@ export interface OwnerContext {
     mentionedMeetGreet: boolean;
     messageCount: number;
     stage: ConversationStage;
+    petProfiles: PetDetail[];
 }
 /** Extract owner context from conversation history. */
 export declare function analyzeConversation(messages: ThreadMessage[], ownerName: string): OwnerContext;

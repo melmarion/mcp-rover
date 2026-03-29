@@ -297,6 +297,116 @@ class RoverBrowser {
         });
         return stats;
     }
+    // ── Owner pet profile scraping ────────────────────────────────────────────
+    /**
+     * Scrape the owner's pet profile from their Rover account.
+     * Called from the message thread — Rover shows a link to the owner's
+     * profile with their pet details (name, breed, age, temperament, etc).
+     *
+     * This is the key advantage over autobook: we know the cat's name and
+     * details before the owner even mentions them.
+     */
+    async getOwnerPetProfile(threadUrl) {
+        this.ensureLoggedIn();
+        const page = this.ensurePage();
+        // Navigate to the thread to find the owner's profile link
+        const url = threadUrl.startsWith("http")
+            ? threadUrl
+            : `${this.BASE_URL}/dashboard/messages/${threadUrl}/`;
+        await page.goto(url, { waitUntil: "domcontentloaded" });
+        await (0, stealth_js_1.humanWaitForLoad)(page);
+        // Find and click the owner's profile / pet info link
+        // Rover typically shows pet details in the booking request or thread header
+        const profileData = await page.evaluate(() => {
+            const data = {
+                ownerName: "",
+                pets: [],
+                profileUrl: window.location.href,
+            };
+            // Owner name — usually in thread header
+            const nameEl = document.querySelector('[class*="owner-name"], [class*="OwnerName"], ' +
+                '[class*="client-name"], [class*="ClientName"], ' +
+                '[class*="contact-name"], [class*="ContactName"], ' +
+                '.convo-name, [class*="participant"]');
+            data.ownerName = nameEl?.textContent?.trim() || "";
+            // Pet details — Rover shows these in the booking request card
+            // or in a sidebar/header section of the conversation
+            const petCards = document.querySelectorAll('[class*="pet-card"], [class*="PetCard"], ' +
+                '[class*="pet-info"], [class*="PetInfo"], ' +
+                '[class*="pet-detail"], [class*="PetDetail"], ' +
+                '[data-testid*="pet"], [class*="animal-info"]');
+            petCards.forEach((card) => {
+                const petName = card.querySelector('[class*="pet-name"], [class*="PetName"], ' +
+                    '[class*="name"], h3, h4, strong')?.textContent?.trim() || "";
+                const breed = card.querySelector('[class*="breed"], [class*="Breed"]')?.textContent?.trim();
+                const age = card.querySelector('[class*="age"], [class*="Age"]')?.textContent?.trim();
+                const weight = card.querySelector('[class*="weight"], [class*="Weight"]')?.textContent?.trim();
+                const size = card.querySelector('[class*="size"], [class*="Size"]')?.textContent?.trim();
+                const temperament = card.querySelector('[class*="temperament"], [class*="Temperament"], ' +
+                    '[class*="personality"], [class*="description"]')?.textContent?.trim();
+                const specialNeeds = card.querySelector('[class*="special"], [class*="Special"], ' +
+                    '[class*="needs"], [class*="medical"]')?.textContent?.trim();
+                const photoEl = card.querySelector("img");
+                // Detect species from context
+                const cardText = card.textContent?.toLowerCase() || "";
+                const isCat = /\bcat|kitten|feline\b/.test(cardText);
+                const isDog = /\bdog|puppy|canine\b/.test(cardText);
+                const species = isCat ? "cat" : isDog ? "dog" : "cat";
+                if (petName) {
+                    data.pets.push({
+                        name: petName,
+                        species,
+                        breed: breed || undefined,
+                        age: age || undefined,
+                        weight: weight || undefined,
+                        size: size || undefined,
+                        temperament: temperament || undefined,
+                        specialNeeds: specialNeeds || undefined,
+                        photoUrl: photoEl?.src || undefined,
+                    });
+                }
+            });
+            // If no pet cards found, try to extract from the booking request text
+            if (data.pets.length === 0) {
+                const bookingInfo = document.querySelector('[class*="booking-request"], [class*="BookingRequest"], ' +
+                    '[class*="request-info"], [class*="RequestInfo"], ' +
+                    '[class*="stay-details"], [class*="StayDetails"]');
+                if (bookingInfo) {
+                    const text = bookingInfo.textContent || "";
+                    // Try to extract pet name from common patterns
+                    const nameMatch = text.match(/(?:for|about|regarding)\s+([A-Z][a-z]+)/);
+                    if (nameMatch) {
+                        data.pets.push({
+                            name: nameMatch[1],
+                            species: /cat|kitten/i.test(text) ? "cat" : "dog",
+                        });
+                    }
+                }
+            }
+            // Dates from booking request
+            const datesEl = document.querySelector('[class*="dates"], [class*="Dates"], ' +
+                '[class*="stay-dates"], [class*="StayDates"]');
+            data.dates = datesEl?.textContent?.trim() || undefined;
+            // Service type
+            const serviceEl = document.querySelector('[class*="service-type"], [class*="ServiceType"], ' +
+                '[class*="service"], [class*="Service"]');
+            data.serviceType = serviceEl?.textContent?.trim() || undefined;
+            // Location
+            const locationEl = document.querySelector('[class*="location"], [class*="Location"], ' +
+                '[class*="address"]');
+            data.location = locationEl?.textContent?.trim() || undefined;
+            return data;
+        });
+        if (!profileData.ownerName && profileData.pets.length === 0) {
+            return null;
+        }
+        return {
+            ownerName: profileData.ownerName,
+            pets: profileData.pets,
+            location: profileData.location,
+            profileUrl: profileData.profileUrl,
+        };
+    }
     // ── Utility ──────────────────────────────────────────────────────────────
     async humanScroll(page, times) {
         for (let i = 0; i < times; i++) {

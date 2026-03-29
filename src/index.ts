@@ -116,6 +116,21 @@ const tools: Tool[] = [
     },
   },
   {
+    name: "get_owner_pets",
+    description:
+      "Scrape the owner's pet profile from a conversation thread. Returns pet names, breeds, ages, temperament, special needs. Use this BEFORE drafting a reply — knowing the cat's name when the owner didn't mention it reads as 'she actually looked at my profile.'",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadUrl: {
+          type: "string",
+          description: "Thread URL or ID",
+        },
+      },
+      required: ["threadUrl"],
+    },
+  },
+  {
     name: "analyze_thread",
     description:
       "Analyze a conversation thread and return the owner context, conversation stage, detected concerns, pricing strategy, and the full LLM prompt ready to generate a reply. Does NOT send anything — just prepares the response.",
@@ -355,6 +370,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "get_owner_pets": {
+        const { threadUrl } = ReadThreadSchema.parse(args);
+        const profile = await browser.getOwnerPetProfile(threadUrl);
+        if (!profile || profile.pets.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Could not extract pet details from this thread. DOM selectors may need updating, or the owner hasn't added pet profiles.",
+              },
+            ],
+          };
+        }
+        const petLines = profile.pets.map((p, i) => {
+          const details = [
+            p.breed ? `Breed: ${p.breed}` : null,
+            p.age ? `Age: ${p.age}` : null,
+            p.weight ? `Weight: ${p.weight}` : null,
+            p.size ? `Size: ${p.size}` : null,
+            p.temperament ? `Temperament: ${p.temperament}` : null,
+            p.specialNeeds ? `Special needs: ${p.specialNeeds}` : null,
+          ].filter(Boolean);
+          return `${i + 1}. **${p.name}** (${p.species})${details.length > 0 ? "\n   " + details.join("\n   ") : ""}`;
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Owner: ${profile.ownerName}\n\n${petLines.join("\n\n")}`,
+            },
+          ],
+        };
+      }
+
       case "analyze_thread": {
         const { threadUrl, ownerName, baseRate } = AnalyzeSchema.parse(args);
         const messages = await browser.getThreadMessages(threadUrl);
@@ -385,13 +434,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "draft_reply": {
         const { threadUrl, ownerName, baseRate } = DraftReplySchema.parse(args);
         const messages = await browser.getThreadMessages(threadUrl);
+
+        // Pull pet profile from Rover before analyzing — get names, breeds, details
+        const petProfile = await browser.getOwnerPetProfile(threadUrl);
+
         const ctx = analyzeConversation(messages, ownerName);
+
+        // Merge pet profile data into context if we got more from the profile than from messages
+        if (petProfile && petProfile.pets.length > 0) {
+          for (const pet of petProfile.pets) {
+            if (pet.name && !ctx.petNames.includes(pet.name)) {
+              ctx.petNames.push(pet.name);
+            }
+            if (pet.species === "dog") ctx.petType = "dog";
+            // Inject concerns from profile data
+            if (pet.specialNeeds) {
+              if (!ctx.concerns.includes("medical")) ctx.concerns.push("medical");
+            }
+            if (pet.temperament) {
+              const t = pet.temperament.toLowerCase();
+              if (/shy|anxious|nervous|scared|timid/.test(t) && !ctx.concerns.includes("anxious_pet"))
+                ctx.concerns.push("anxious_pet");
+              if (/energy|hyper|active|playful|wild/.test(t) && !ctx.concerns.includes("high_energy"))
+                ctx.concerns.push("high_energy");
+              if (/senior|old|elderly/.test(t) && !ctx.concerns.includes("senior_pet"))
+                ctx.concerns.push("senior_pet");
+              if (/vocal|loud|meow/.test(t) && !ctx.concerns.includes("vocal_pet"))
+                ctx.concerns.push("vocal_pet");
+            }
+          }
+        }
+
         const pricing = calculatePricing(ctx, baseRate || 99);
         const systemPrompt = buildSystemPrompt(ctx);
         const userPrompt = buildUserPrompt(messages, ctx);
 
+        // Build pet profile summary for output
+        const petProfileSummary = petProfile && petProfile.pets.length > 0
+          ? petProfile.pets.map((p) => {
+              const parts = [p.name, p.species, p.breed, p.age, p.temperament].filter(Boolean);
+              return parts.join(" / ");
+            }).join("; ")
+          : "no profile data scraped";
+
         const output = [
           `**Conversation stage:** ${ctx.stage}`,
+          `**Pet profile (from Rover):** ${petProfileSummary}`,
           `**Pricing:** ${pricing.shouldOffer ? `offer $${pricing.offeredRate}/night — ${pricing.framing}` : `hold at $${pricing.originalRate}`}`,
           `**Detected:** pets=[${ctx.petNames.join(",")}] concerns=[${ctx.concerns.join(",")}] questions=[${ctx.questionsAsked.join(",")}]`,
           "",

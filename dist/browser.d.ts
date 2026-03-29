@@ -26,6 +26,26 @@ export interface InboxPollResult {
     updatedThreads: InboxThread[];
     timestamp: string;
 }
+export interface OwnerPetProfile {
+    ownerName: string;
+    pets: PetDetail[];
+    location?: string;
+    memberSince?: string;
+    profileUrl: string;
+}
+export interface PetDetail {
+    name: string;
+    species: string;
+    breed?: string;
+    age?: string;
+    weight?: string;
+    size?: string;
+    temperament?: string;
+    specialNeeds?: string;
+    spayedNeutered?: boolean;
+    vaccinated?: boolean;
+    photoUrl?: string;
+}
 export interface SitterStats {
     responseRate?: string;
     responseTime?: string;
@@ -60,6 +80,15 @@ export declare class RoverBrowser {
         success: boolean;
     }>;
     getSitterStats(): Promise<SitterStats>;
+    /**
+     * Scrape the owner's pet profile from their Rover account.
+     * Called from the message thread — Rover shows a link to the owner's
+     * profile with their pet details (name, breed, age, temperament, etc).
+     *
+     * This is the key advantage over autobook: we know the cat's name and
+     * details before the owner even mentions them.
+     */
+    getOwnerPetProfile(threadUrl: string): Promise<OwnerPetProfile | null>;
     private humanScroll;
     getSession(): RoverSession;
     getNextPollInterval(): number;
