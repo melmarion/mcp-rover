@@ -8,6 +8,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { RoverBrowser } from "./browser.js";
+import {
+  analyzeConversation,
+  buildSystemPrompt,
+  buildUserPrompt,
+  calculatePricing,
+} from "./responder.js";
 
 const browser = new RoverBrowser();
 let browserInitialized = false;
@@ -109,6 +115,52 @@ const tools: Tool[] = [
       required: [],
     },
   },
+  {
+    name: "analyze_thread",
+    description:
+      "Analyze a conversation thread and return the owner context, conversation stage, detected concerns, pricing strategy, and the full LLM prompt ready to generate a reply. Does NOT send anything — just prepares the response.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadUrl: {
+          type: "string",
+          description: "Thread URL or ID to analyze",
+        },
+        ownerName: {
+          type: "string",
+          description: "Owner's name (from inbox listing)",
+        },
+        baseRate: {
+          type: "number",
+          description: "Your base nightly rate in dollars (default: 99)",
+        },
+      },
+      required: ["threadUrl", "ownerName"],
+    },
+  },
+  {
+    name: "draft_reply",
+    description:
+      "Generate a Persuasion-Max optimized reply for a conversation thread. Returns the system prompt and user prompt for your LLM (Ollama or Claude). Analyzes conversation stage, extracts pet details, concerns, and pricing strategy automatically. Does NOT send — review the draft first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadUrl: {
+          type: "string",
+          description: "Thread URL or ID",
+        },
+        ownerName: {
+          type: "string",
+          description: "Owner's name",
+        },
+        baseRate: {
+          type: "number",
+          description: "Your base nightly rate (default: 99)",
+        },
+      },
+      required: ["threadUrl", "ownerName"],
+    },
+  },
 ];
 
 // ── Validation schemas ───────────────────────────────────────────────────────
@@ -125,6 +177,18 @@ const ReadThreadSchema = z.object({
 const ReplySchema = z.object({
   threadUrl: z.string().min(1),
   message: z.string().min(1),
+});
+
+const AnalyzeSchema = z.object({
+  threadUrl: z.string().min(1),
+  ownerName: z.string().min(1),
+  baseRate: z.number().optional(),
+});
+
+const DraftReplySchema = z.object({
+  threadUrl: z.string().min(1),
+  ownerName: z.string().min(1),
+  baseRate: z.number().optional(),
 });
 
 // ── Server ───────────────────────────────────────────────────────────────────
@@ -289,6 +353,62 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             },
           ],
         };
+      }
+
+      case "analyze_thread": {
+        const { threadUrl, ownerName, baseRate } = AnalyzeSchema.parse(args);
+        const messages = await browser.getThreadMessages(threadUrl);
+        const ctx = analyzeConversation(messages, ownerName);
+        const pricing = calculatePricing(ctx, baseRate || 99);
+
+        const analysis = [
+          `**Stage:** ${ctx.stage}`,
+          `**Pet(s):** ${ctx.petNames.length > 0 ? ctx.petNames.join(", ") : "not yet identified"} (${ctx.petType})`,
+          `**Dates:** ${ctx.dates || "not discussed"}`,
+          `**Long-term:** ${ctx.isLongTerm ? "yes" : "no"}`,
+          `**Multi-pet:** ${ctx.isMultiPet ? "yes" : "no"}`,
+          `**Concerns:** ${ctx.concerns.length > 0 ? ctx.concerns.join(", ") : "none detected"}`,
+          `**Questions:** ${ctx.questionsAsked.length > 0 ? ctx.questionsAsked.join(", ") : "none"}`,
+          `**Mentioned price:** ${ctx.mentionedPrice ? "yes" : "no"}`,
+          `**Mentioned other sitters:** ${ctx.mentionedOtherSitters ? "yes" : "no"}`,
+          `**Messages from owner:** ${ctx.messageCount}`,
+          "",
+          `**Pricing strategy:**`,
+          `  Offer discount: ${pricing.shouldOffer ? "yes" : "no"}`,
+          `  Rate: $${pricing.offeredRate}/night${pricing.shouldOffer ? ` (from $${pricing.originalRate})` : ""}`,
+          `  Framing: ${pricing.framing}`,
+        ].join("\n");
+
+        return { content: [{ type: "text", text: analysis }] };
+      }
+
+      case "draft_reply": {
+        const { threadUrl, ownerName, baseRate } = DraftReplySchema.parse(args);
+        const messages = await browser.getThreadMessages(threadUrl);
+        const ctx = analyzeConversation(messages, ownerName);
+        const pricing = calculatePricing(ctx, baseRate || 99);
+        const systemPrompt = buildSystemPrompt(ctx);
+        const userPrompt = buildUserPrompt(messages, ctx);
+
+        const output = [
+          `**Conversation stage:** ${ctx.stage}`,
+          `**Pricing:** ${pricing.shouldOffer ? `offer $${pricing.offeredRate}/night — ${pricing.framing}` : `hold at $${pricing.originalRate}`}`,
+          `**Detected:** pets=[${ctx.petNames.join(",")}] concerns=[${ctx.concerns.join(",")}] questions=[${ctx.questionsAsked.join(",")}]`,
+          "",
+          "---",
+          "",
+          "**SYSTEM PROMPT** (pass to Ollama or Claude):",
+          "",
+          systemPrompt,
+          "",
+          "---",
+          "",
+          "**USER PROMPT:**",
+          "",
+          userPrompt,
+        ].join("\n");
+
+        return { content: [{ type: "text", text: output }] };
       }
 
       default:

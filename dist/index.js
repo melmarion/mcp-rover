@@ -6,6 +6,7 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const zod_1 = require("zod");
 const browser_js_1 = require("./browser.js");
+const responder_js_1 = require("./responder.js");
 const browser = new browser_js_1.RoverBrowser();
 let browserInitialized = false;
 async function ensureBrowser() {
@@ -96,6 +97,50 @@ const tools = [
             required: [],
         },
     },
+    {
+        name: "analyze_thread",
+        description: "Analyze a conversation thread and return the owner context, conversation stage, detected concerns, pricing strategy, and the full LLM prompt ready to generate a reply. Does NOT send anything — just prepares the response.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                threadUrl: {
+                    type: "string",
+                    description: "Thread URL or ID to analyze",
+                },
+                ownerName: {
+                    type: "string",
+                    description: "Owner's name (from inbox listing)",
+                },
+                baseRate: {
+                    type: "number",
+                    description: "Your base nightly rate in dollars (default: 99)",
+                },
+            },
+            required: ["threadUrl", "ownerName"],
+        },
+    },
+    {
+        name: "draft_reply",
+        description: "Generate a Persuasion-Max optimized reply for a conversation thread. Returns the system prompt and user prompt for your LLM (Ollama or Claude). Analyzes conversation stage, extracts pet details, concerns, and pricing strategy automatically. Does NOT send — review the draft first.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                threadUrl: {
+                    type: "string",
+                    description: "Thread URL or ID",
+                },
+                ownerName: {
+                    type: "string",
+                    description: "Owner's name",
+                },
+                baseRate: {
+                    type: "number",
+                    description: "Your base nightly rate (default: 99)",
+                },
+            },
+            required: ["threadUrl", "ownerName"],
+        },
+    },
 ];
 // ── Validation schemas ───────────────────────────────────────────────────────
 const LoginSchema = zod_1.z.object({
@@ -108,6 +153,16 @@ const ReadThreadSchema = zod_1.z.object({
 const ReplySchema = zod_1.z.object({
     threadUrl: zod_1.z.string().min(1),
     message: zod_1.z.string().min(1),
+});
+const AnalyzeSchema = zod_1.z.object({
+    threadUrl: zod_1.z.string().min(1),
+    ownerName: zod_1.z.string().min(1),
+    baseRate: zod_1.z.number().optional(),
+});
+const DraftReplySchema = zod_1.z.object({
+    threadUrl: zod_1.z.string().min(1),
+    ownerName: zod_1.z.string().min(1),
+    baseRate: zod_1.z.number().optional(),
 });
 // ── Server ───────────────────────────────────────────────────────────────────
 const server = new index_js_1.Server({ name: "mcp-rover-sitter", version: "2.0.0" }, { capabilities: { tools: {} } });
@@ -235,6 +290,56 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
+            }
+            case "analyze_thread": {
+                const { threadUrl, ownerName, baseRate } = AnalyzeSchema.parse(args);
+                const messages = await browser.getThreadMessages(threadUrl);
+                const ctx = (0, responder_js_1.analyzeConversation)(messages, ownerName);
+                const pricing = (0, responder_js_1.calculatePricing)(ctx, baseRate || 99);
+                const analysis = [
+                    `**Stage:** ${ctx.stage}`,
+                    `**Pet(s):** ${ctx.petNames.length > 0 ? ctx.petNames.join(", ") : "not yet identified"} (${ctx.petType})`,
+                    `**Dates:** ${ctx.dates || "not discussed"}`,
+                    `**Long-term:** ${ctx.isLongTerm ? "yes" : "no"}`,
+                    `**Multi-pet:** ${ctx.isMultiPet ? "yes" : "no"}`,
+                    `**Concerns:** ${ctx.concerns.length > 0 ? ctx.concerns.join(", ") : "none detected"}`,
+                    `**Questions:** ${ctx.questionsAsked.length > 0 ? ctx.questionsAsked.join(", ") : "none"}`,
+                    `**Mentioned price:** ${ctx.mentionedPrice ? "yes" : "no"}`,
+                    `**Mentioned other sitters:** ${ctx.mentionedOtherSitters ? "yes" : "no"}`,
+                    `**Messages from owner:** ${ctx.messageCount}`,
+                    "",
+                    `**Pricing strategy:**`,
+                    `  Offer discount: ${pricing.shouldOffer ? "yes" : "no"}`,
+                    `  Rate: $${pricing.offeredRate}/night${pricing.shouldOffer ? ` (from $${pricing.originalRate})` : ""}`,
+                    `  Framing: ${pricing.framing}`,
+                ].join("\n");
+                return { content: [{ type: "text", text: analysis }] };
+            }
+            case "draft_reply": {
+                const { threadUrl, ownerName, baseRate } = DraftReplySchema.parse(args);
+                const messages = await browser.getThreadMessages(threadUrl);
+                const ctx = (0, responder_js_1.analyzeConversation)(messages, ownerName);
+                const pricing = (0, responder_js_1.calculatePricing)(ctx, baseRate || 99);
+                const systemPrompt = (0, responder_js_1.buildSystemPrompt)(ctx);
+                const userPrompt = (0, responder_js_1.buildUserPrompt)(messages, ctx);
+                const output = [
+                    `**Conversation stage:** ${ctx.stage}`,
+                    `**Pricing:** ${pricing.shouldOffer ? `offer $${pricing.offeredRate}/night — ${pricing.framing}` : `hold at $${pricing.originalRate}`}`,
+                    `**Detected:** pets=[${ctx.petNames.join(",")}] concerns=[${ctx.concerns.join(",")}] questions=[${ctx.questionsAsked.join(",")}]`,
+                    "",
+                    "---",
+                    "",
+                    "**SYSTEM PROMPT** (pass to Ollama or Claude):",
+                    "",
+                    systemPrompt,
+                    "",
+                    "---",
+                    "",
+                    "**USER PROMPT:**",
+                    "",
+                    userPrompt,
+                ].join("\n");
+                return { content: [{ type: "text", text: output }] };
             }
             default:
                 return {
