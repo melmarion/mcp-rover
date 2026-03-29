@@ -14,123 +14,23 @@ async function ensureBrowser() {
         browserInitialized = true;
     }
 }
-// ── Tool definitions ──────────────────────────────────────────────────────────
+// ── Tool definitions (sitter-side) ───────────────────────────────────────────
 const tools = [
     {
         name: "login",
-        description: "Log in to Rover with your email and password. Required before most operations.",
+        description: "Log in to your Rover sitter account. Credentials are used for this session only and never stored. Cookies are saved locally for session persistence.",
         inputSchema: {
             type: "object",
             properties: {
-                email: { type: "string", description: "Your Rover account email address" },
+                email: { type: "string", description: "Your Rover account email" },
                 password: { type: "string", description: "Your Rover account password" },
             },
             required: ["email", "password"],
         },
     },
     {
-        name: "search_sitters",
-        description: "Search for pet sitters on Rover by location and service type. Returns a list of available sitters with ratings and pricing.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                location: {
-                    type: "string",
-                    description: "City, neighborhood, or zip code to search in (e.g. 'Seattle, WA' or '98101')",
-                },
-                serviceType: {
-                    type: "string",
-                    enum: ["boarding", "house_sitting", "drop_in", "doggy_day_care", "dog_walking"],
-                    description: "Type of pet care service",
-                },
-                startDate: {
-                    type: "string",
-                    description: "Start date in YYYY-MM-DD format",
-                },
-                endDate: {
-                    type: "string",
-                    description: "End date in YYYY-MM-DD format",
-                },
-                petCount: {
-                    type: "number",
-                    description: "Number of pets",
-                },
-                petSize: {
-                    type: "string",
-                    enum: ["small", "medium", "large", "giant"],
-                    description: "Size of your pet",
-                },
-            },
-            required: ["location", "serviceType"],
-        },
-    },
-    {
-        name: "get_sitter_profile",
-        description: "Get detailed profile information for a specific sitter including bio, reviews, services offered, and rates.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                sitterIdOrUrl: {
-                    type: "string",
-                    description: "Sitter's Rover username/ID or full profile URL",
-                },
-            },
-            required: ["sitterIdOrUrl"],
-        },
-    },
-    {
-        name: "search_services",
-        description: "List all available Rover service types in a given location with descriptions.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                location: {
-                    type: "string",
-                    description: "Location to search for available services",
-                },
-            },
-            required: ["location"],
-        },
-    },
-    {
-        name: "request_booking",
-        description: "Send a booking request to a sitter. Requires being logged in.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                sitterId: {
-                    type: "string",
-                    description: "Sitter's Rover username/ID or profile URL",
-                },
-                serviceType: {
-                    type: "string",
-                    enum: ["boarding", "house_sitting", "drop_in", "doggy_day_care", "dog_walking"],
-                    description: "Type of service to book",
-                },
-                startDate: {
-                    type: "string",
-                    description: "Start date in YYYY-MM-DD format",
-                },
-                endDate: {
-                    type: "string",
-                    description: "End date in YYYY-MM-DD format",
-                },
-                petIds: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "List of pet IDs to include in the booking",
-                },
-                message: {
-                    type: "string",
-                    description: "Optional introductory message to the sitter",
-                },
-            },
-            required: ["sitterId", "serviceType", "startDate", "endDate", "petIds"],
-        },
-    },
-    {
-        name: "get_bookings",
-        description: "View your current and past bookings on Rover. Requires being logged in.",
+        name: "get_inbox",
+        description: "Get all message threads in your sitter inbox. Shows owner name, last message preview, time, and unread status.",
         inputSchema: {
             type: "object",
             properties: {},
@@ -138,104 +38,8 @@ const tools = [
         },
     },
     {
-        name: "message_sitter",
-        description: "Send a message to a sitter on Rover. Requires being logged in.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                sitterId: {
-                    type: "string",
-                    description: "Sitter's Rover username/ID or profile URL",
-                },
-                message: {
-                    type: "string",
-                    description: "Message text to send to the sitter",
-                },
-            },
-            required: ["sitterId", "message"],
-        },
-    },
-    {
-        name: "get_messages",
-        description: "Get your message threads on Rover. Optionally filter by sitter ID.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                sitterId: {
-                    type: "string",
-                    description: "Optional sitter ID to get messages from a specific thread",
-                },
-            },
-            required: [],
-        },
-    },
-    {
-        name: "add_pet_profile",
-        description: "Add a new pet to your Rover account. Requires being logged in.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                name: { type: "string", description: "Pet's name" },
-                species: {
-                    type: "string",
-                    enum: ["dog", "cat", "other"],
-                    description: "Pet species",
-                },
-                breed: { type: "string", description: "Pet's breed" },
-                age: { type: "number", description: "Pet's age in years" },
-                weight: { type: "number", description: "Pet's weight in pounds" },
-                size: {
-                    type: "string",
-                    enum: ["small", "medium", "large", "giant"],
-                    description: "Pet size category",
-                },
-                temperament: {
-                    type: "string",
-                    description: "Description of pet's temperament and personality",
-                },
-                specialNeeds: {
-                    type: "string",
-                    description: "Any special needs, medical conditions, or care requirements",
-                },
-                vaccinated: {
-                    type: "boolean",
-                    description: "Whether the pet is up to date on vaccinations",
-                },
-                spayedNeutered: {
-                    type: "boolean",
-                    description: "Whether the pet is spayed or neutered",
-                },
-            },
-            required: ["name", "species"],
-        },
-    },
-    {
-        name: "update_pet_profile",
-        description: "Update an existing pet's profile details such as size, temperament, and special needs.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                petId: { type: "string", description: "The pet's ID on Rover" },
-                name: { type: "string", description: "Updated pet name" },
-                breed: { type: "string", description: "Updated breed" },
-                age: { type: "number", description: "Updated age in years" },
-                weight: { type: "number", description: "Updated weight in pounds" },
-                size: {
-                    type: "string",
-                    enum: ["small", "medium", "large", "giant"],
-                    description: "Updated size category",
-                },
-                temperament: { type: "string", description: "Updated temperament description" },
-                specialNeeds: { type: "string", description: "Updated special needs or care notes" },
-                vaccinated: { type: "boolean", description: "Updated vaccination status" },
-                spayedNeutered: { type: "boolean", description: "Updated spayed/neutered status" },
-            },
-            required: ["petId"],
-        },
-    },
-    {
-        name: "get_pets",
-        description: "List all pets registered on your Rover account. Requires being logged in.",
+        name: "poll_inbox",
+        description: "Check for new or unread messages since last poll. Returns only new threads and threads with new unread messages. Use this for monitoring.",
         inputSchema: {
             type: "object",
             properties: {},
@@ -243,32 +47,49 @@ const tools = [
         },
     },
     {
-        name: "leave_review",
-        description: "Leave a review for a sitter after a completed service. Requires being logged in.",
+        name: "read_thread",
+        description: "Read the full message history for a specific conversation thread. Returns all messages with sender, text, and timestamp.",
         inputSchema: {
             type: "object",
             properties: {
-                bookingId: {
+                threadUrl: {
                     type: "string",
-                    description: "The booking ID for the completed service",
-                },
-                rating: {
-                    type: "number",
-                    description: "Rating from 1 to 5 stars",
-                    minimum: 1,
-                    maximum: 5,
-                },
-                reviewText: {
-                    type: "string",
-                    description: "Written review describing your experience",
+                    description: "Thread URL or ID from get_inbox results",
                 },
             },
-            required: ["bookingId", "rating", "reviewText"],
+            required: ["threadUrl"],
         },
     },
     {
-        name: "get_favorites",
-        description: "Get your list of favorited sitters on Rover. Requires being logged in.",
+        name: "reply",
+        description: "Send a reply message in an existing conversation thread. Types with human-like timing and delays.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                threadUrl: {
+                    type: "string",
+                    description: "Thread URL or ID to reply in",
+                },
+                message: {
+                    type: "string",
+                    description: "Your reply message text",
+                },
+            },
+            required: ["threadUrl", "message"],
+        },
+    },
+    {
+        name: "get_stats",
+        description: "Get your sitter performance scores from the dashboard: response rate, response time, booking rate, repeat score, review average, and Star Sitter status.",
+        inputSchema: {
+            type: "object",
+            properties: {},
+            required: [],
+        },
+    },
+    {
+        name: "next_poll_time",
+        description: "Get the recommended wait time (in ms) before the next inbox poll. Uses gaussian jitter to avoid clockwork timing patterns.",
         inputSchema: {
             type: "object",
             properties: {},
@@ -276,71 +97,20 @@ const tools = [
         },
     },
 ];
-// ── Input schemas (for validation) ───────────────────────────────────────────
+// ── Validation schemas ───────────────────────────────────────────────────────
 const LoginSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(1),
 });
-const SearchSittersSchema = zod_1.z.object({
-    location: zod_1.z.string().min(1),
-    serviceType: zod_1.z.enum(["boarding", "house_sitting", "drop_in", "doggy_day_care", "dog_walking"]),
-    startDate: zod_1.z.string().optional(),
-    endDate: zod_1.z.string().optional(),
-    petCount: zod_1.z.number().optional(),
-    petSize: zod_1.z.enum(["small", "medium", "large", "giant"]).optional(),
+const ReadThreadSchema = zod_1.z.object({
+    threadUrl: zod_1.z.string().min(1),
 });
-const GetSitterProfileSchema = zod_1.z.object({
-    sitterIdOrUrl: zod_1.z.string().min(1),
-});
-const SearchServicesSchema = zod_1.z.object({
-    location: zod_1.z.string().min(1),
-});
-const RequestBookingSchema = zod_1.z.object({
-    sitterId: zod_1.z.string().min(1),
-    serviceType: zod_1.z.enum(["boarding", "house_sitting", "drop_in", "doggy_day_care", "dog_walking"]),
-    startDate: zod_1.z.string().min(1),
-    endDate: zod_1.z.string().min(1),
-    petIds: zod_1.z.array(zod_1.z.string()),
-    message: zod_1.z.string().optional(),
-});
-const MessageSitterSchema = zod_1.z.object({
-    sitterId: zod_1.z.string().min(1),
+const ReplySchema = zod_1.z.object({
+    threadUrl: zod_1.z.string().min(1),
     message: zod_1.z.string().min(1),
 });
-const GetMessagesSchema = zod_1.z.object({
-    sitterId: zod_1.z.string().optional(),
-});
-const AddPetSchema = zod_1.z.object({
-    name: zod_1.z.string().min(1),
-    species: zod_1.z.enum(["dog", "cat", "other"]),
-    breed: zod_1.z.string().optional(),
-    age: zod_1.z.number().optional(),
-    weight: zod_1.z.number().optional(),
-    size: zod_1.z.enum(["small", "medium", "large", "giant"]).optional(),
-    temperament: zod_1.z.string().optional(),
-    specialNeeds: zod_1.z.string().optional(),
-    vaccinated: zod_1.z.boolean().optional(),
-    spayedNeutered: zod_1.z.boolean().optional(),
-});
-const UpdatePetSchema = zod_1.z.object({
-    petId: zod_1.z.string().min(1),
-    name: zod_1.z.string().optional(),
-    breed: zod_1.z.string().optional(),
-    age: zod_1.z.number().optional(),
-    weight: zod_1.z.number().optional(),
-    size: zod_1.z.enum(["small", "medium", "large", "giant"]).optional(),
-    temperament: zod_1.z.string().optional(),
-    specialNeeds: zod_1.z.string().optional(),
-    vaccinated: zod_1.z.boolean().optional(),
-    spayedNeutered: zod_1.z.boolean().optional(),
-});
-const LeaveReviewSchema = zod_1.z.object({
-    bookingId: zod_1.z.string().min(1),
-    rating: zod_1.z.number().min(1).max(5),
-    reviewText: zod_1.z.string().min(1),
-});
-// ── Server setup ──────────────────────────────────────────────────────────────
-const server = new index_js_1.Server({ name: "@striderlabs/mcp-rover", version: "1.0.0" }, { capabilities: { tools: {} } });
+// ── Server ───────────────────────────────────────────────────────────────────
+const server = new index_js_1.Server({ name: "mcp-rover-sitter", version: "2.0.0" }, { capabilities: { tools: {} } });
 server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => ({ tools }));
 server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -355,203 +125,115 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                         {
                             type: "text",
                             text: session.isLoggedIn
-                                ? `Successfully logged in as ${session.email}.`
-                                : "Login failed. Please check your credentials.",
+                                ? `Logged in as ${session.email}. Session cookies saved.`
+                                : "Login failed. Check credentials.",
                         },
                     ],
                 };
             }
-            case "search_sitters": {
-                const params = SearchSittersSchema.parse(args);
-                const sitters = await browser.searchSitters(params);
-                if (sitters.length === 0) {
-                    return {
-                        content: [{ type: "text", text: "No sitters found for the given criteria." }],
-                    };
+            case "get_inbox": {
+                const threads = await browser.getInboxThreads();
+                if (threads.length === 0) {
+                    return { content: [{ type: "text", text: "No messages in inbox." }] };
                 }
-                const formatted = sitters
-                    .map((s, i) => `${i + 1}. **${s.name}** — ${s.location}\n` +
-                    `   Rating: ${s.rating}/5 (${s.reviewCount} reviews)\n` +
-                    `   Price: $${s.price}/${s.priceUnit}\n` +
-                    `   Profile: ${s.profileUrl}` +
-                    (s.summary ? `\n   "${s.summary}"` : ""))
+                const formatted = threads
+                    .map((t, i) => `${i + 1}. ${t.isUnread ? "[UNREAD] " : ""}**${t.ownerName}**\n` +
+                    `   "${t.lastMessage}"\n` +
+                    `   ${t.lastMessageTime}\n` +
+                    `   Thread: ${t.threadUrl}`)
                     .join("\n\n");
                 return {
                     content: [
                         {
                             type: "text",
-                            text: `Found ${sitters.length} sitters in ${params.location}:\n\n${formatted}`,
+                            text: `${threads.length} threads:\n\n${formatted}`,
                         },
                     ],
                 };
             }
-            case "get_sitter_profile": {
-                const { sitterIdOrUrl } = GetSitterProfileSchema.parse(args);
-                const profile = await browser.getSitterProfile(sitterIdOrUrl);
-                const reviewsText = profile.reviews.length > 0
-                    ? profile.reviews
-                        .slice(0, 5)
-                        .map((r) => `  • ${r.authorName} (${r.rating}/5, ${r.date}): "${r.text}"`)
-                        .join("\n")
-                    : "  No reviews yet.";
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `**${profile.name}**\n` +
-                                `Location: ${profile.location}\n` +
-                                `Rating: ${profile.rating}/5 (${profile.reviewCount} reviews)\n` +
-                                `Starting at: $${profile.price}/${profile.priceUnit}\n` +
-                                (profile.responseRate ? `Response rate: ${profile.responseRate}\n` : "") +
-                                (profile.responseTime ? `Response time: ${profile.responseTime}\n` : "") +
-                                (profile.fullBio ? `\nAbout: ${profile.fullBio}\n` : "") +
-                                `\nRecent Reviews:\n${reviewsText}`,
-                        },
-                    ],
-                };
-            }
-            case "search_services": {
-                const { location } = SearchServicesSchema.parse(args);
-                const services = await browser.searchServices(location);
-                const formatted = services
-                    .map((s) => `• **${s.type.replace(/_/g, " ")}**: ${s.description}`)
-                    .join("\n");
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Available Rover services in ${location}:\n\n${formatted}`,
-                        },
-                    ],
-                };
-            }
-            case "request_booking": {
-                const params = RequestBookingSchema.parse(args);
-                const result = await browser.requestBooking(params);
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: result.success
-                                ? `Booking request sent! ${result.message}${result.bookingId ? ` Booking ID: ${result.bookingId}` : ""}`
-                                : `Failed to send booking request: ${result.message}`,
-                        },
-                    ],
-                };
-            }
-            case "get_bookings": {
-                const bookings = await browser.getBookings();
-                if (bookings.length === 0) {
-                    return { content: [{ type: "text", text: "No bookings found." }] };
+            case "poll_inbox": {
+                const result = await browser.pollInbox();
+                const parts = [];
+                if (result.newThreads.length > 0) {
+                    parts.push(`**${result.newThreads.length} NEW thread(s):**\n` +
+                        result.newThreads
+                            .map((t) => `  - ${t.ownerName}: "${t.lastMessage}"\n    Thread: ${t.threadUrl}`)
+                            .join("\n"));
                 }
-                const formatted = bookings
-                    .map((b) => `**Booking ${b.id}**\n` +
-                    `  Sitter: ${b.sitterName}\n` +
-                    `  Service: ${b.serviceType.replace(/_/g, " ")}\n` +
-                    `  Dates: ${b.startDate} – ${b.endDate}\n` +
-                    `  Status: ${b.status}\n` +
-                    `  Total: $${b.totalPrice}`)
-                    .join("\n\n");
-                return { content: [{ type: "text", text: formatted }] };
-            }
-            case "message_sitter": {
-                const { sitterId, message } = MessageSitterSchema.parse(args);
-                const result = await browser.messageSitter(sitterId, message);
+                if (result.updatedThreads.length > 0) {
+                    parts.push(`**${result.updatedThreads.length} thread(s) with new messages:**\n` +
+                        result.updatedThreads
+                            .map((t) => `  - ${t.ownerName}: "${t.lastMessage}"\n    Thread: ${t.threadUrl}`)
+                            .join("\n"));
+                }
+                if (parts.length === 0) {
+                    parts.push("No new messages.");
+                }
                 return {
                     content: [
                         {
                             type: "text",
-                            text: result.success
-                                ? "Message sent successfully!"
-                                : "Failed to send message. Please try again.",
+                            text: parts.join("\n\n") + `\n\nPolled at: ${result.timestamp}`,
                         },
                     ],
                 };
             }
-            case "get_messages": {
-                const { sitterId } = GetMessagesSchema.parse(args);
-                const messages = await browser.getMessages(sitterId);
+            case "read_thread": {
+                const { threadUrl } = ReadThreadSchema.parse(args);
+                const messages = await browser.getThreadMessages(threadUrl);
                 if (messages.length === 0) {
-                    return { content: [{ type: "text", text: "No messages found." }] };
+                    return { content: [{ type: "text", text: "No messages in this thread." }] };
                 }
                 const formatted = messages
-                    .map((m) => `**${m.senderName}** (${m.timestamp})${m.isRead ? "" : " [UNREAD]"}:\n  ${m.text}`)
+                    .map((m) => `**${m.sender}** (${m.timestamp}):\n  ${m.text}`)
                     .join("\n\n");
                 return { content: [{ type: "text", text: formatted }] };
             }
-            case "add_pet_profile": {
-                const petData = AddPetSchema.parse(args);
-                const result = await browser.addPetProfile(petData);
+            case "reply": {
+                const { threadUrl, message } = ReplySchema.parse(args);
+                const result = await browser.replyToThread(threadUrl, message);
                 return {
                     content: [
                         {
                             type: "text",
                             text: result.success
-                                ? `Pet profile for ${petData.name} created successfully!${result.petId ? ` Pet ID: ${result.petId}` : ""}`
-                                : "Failed to create pet profile. Please try again.",
+                                ? "Reply sent."
+                                : "Failed to send reply.",
                         },
                     ],
                 };
             }
-            case "update_pet_profile": {
-                const { petId, ...updates } = UpdatePetSchema.parse(args);
-                const result = await browser.updatePetProfile(petId, updates);
+            case "get_stats": {
+                const stats = await browser.getSitterStats();
+                const lines = [
+                    stats.responseRate ? `Response rate: ${stats.responseRate}` : null,
+                    stats.responseTime ? `Response time: ${stats.responseTime}` : null,
+                    stats.bookingRate ? `Booking rate: ${stats.bookingRate}` : null,
+                    stats.repeatScore ? `Repeat score: ${stats.repeatScore}` : null,
+                    stats.reviewAverage ? `Review average: ${stats.reviewAverage}` : null,
+                    stats.isStarSitter ? "Star Sitter: Yes" : null,
+                ].filter(Boolean);
                 return {
                     content: [
                         {
                             type: "text",
-                            text: result.success
-                                ? `Pet profile ${petId} updated successfully!`
-                                : "Failed to update pet profile. Please try again.",
+                            text: lines.length > 0
+                                ? lines.join("\n")
+                                : "Could not read dashboard stats. DOM selectors may need updating.",
                         },
                     ],
                 };
             }
-            case "get_pets": {
-                const pets = await browser.getPets();
-                if (pets.length === 0) {
-                    return {
-                        content: [{ type: "text", text: "No pets found on your account." }],
-                    };
-                }
-                const formatted = pets
-                    .map((p) => `**${p.name}** (ID: ${p.id})\n` +
-                    `  Species: ${p.species}` +
-                    (p.breed ? `, Breed: ${p.breed}` : "") +
-                    (p.age !== undefined ? `, Age: ${p.age} years` : "") +
-                    (p.weight !== undefined ? `, Weight: ${p.weight} lbs` : "") +
-                    (p.size ? `, Size: ${p.size}` : "") +
-                    (p.specialNeeds ? `\n  Special needs: ${p.specialNeeds}` : ""))
-                    .join("\n\n");
-                return { content: [{ type: "text", text: formatted }] };
-            }
-            case "leave_review": {
-                const { bookingId, rating, reviewText } = LeaveReviewSchema.parse(args);
-                const result = await browser.leaveReview(bookingId, rating, reviewText);
+            case "next_poll_time": {
+                const ms = browser.getNextPollInterval();
+                const minutes = (ms / 60_000).toFixed(1);
                 return {
                     content: [
                         {
                             type: "text",
-                            text: result.success
-                                ? `Review submitted successfully! You gave ${rating}/5 stars.`
-                                : "Failed to submit review. The booking may not be eligible for review yet.",
+                            text: `Next poll in ${minutes} minutes (${ms}ms).`,
                         },
                     ],
-                };
-            }
-            case "get_favorites": {
-                const favorites = await browser.getFavorites();
-                if (favorites.length === 0) {
-                    return { content: [{ type: "text", text: "No favorited sitters found." }] };
-                }
-                const formatted = favorites
-                    .map((s, i) => `${i + 1}. **${s.name}** — ${s.location}\n` +
-                    `   Rating: ${s.rating}/5\n` +
-                    `   From $${s.price}/${s.priceUnit}\n` +
-                    `   Profile: ${s.profileUrl}`)
-                    .join("\n\n");
-                return {
-                    content: [{ type: "text", text: `Your favorited sitters:\n\n${formatted}` }],
                 };
             }
             default:
@@ -569,7 +251,7 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
         };
     }
 });
-// ── Graceful shutdown ─────────────────────────────────────────────────────────
+// ── Shutdown ─────────────────────────────────────────────────────────────────
 async function shutdown() {
     if (browserInitialized) {
         await browser.close();
@@ -578,11 +260,11 @@ async function shutdown() {
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-// ── Start server ──────────────────────────────────────────────────────────────
+// ── Start ────────────────────────────────────────────────────────────────────
 async function main() {
     const transport = new stdio_js_1.StdioServerTransport();
     await server.connect(transport);
-    console.error("@striderlabs/mcp-rover server running on stdio");
+    console.error("mcp-rover-sitter v2.0.0 running on stdio");
 }
 main().catch((error) => {
     console.error("Fatal error:", error);

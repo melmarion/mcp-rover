@@ -2,88 +2,38 @@ export interface RoverSession {
     isLoggedIn: boolean;
     userId?: string;
     email?: string;
+    isSitter: boolean;
 }
-export interface SitterSearchParams {
-    location: string;
-    serviceType: "boarding" | "house_sitting" | "drop_in" | "doggy_day_care" | "dog_walking";
-    startDate?: string;
-    endDate?: string;
-    petCount?: number;
-    petSize?: "small" | "medium" | "large" | "giant";
-}
-export interface SitterResult {
-    id: string;
-    name: string;
-    location: string;
-    rating: number;
-    reviewCount: number;
-    price: number;
-    priceUnit: string;
-    services: string[];
-    profileUrl: string;
-    avatarUrl?: string;
-    repeatClientCount?: number;
-    yearsExperience?: number;
-    summary?: string;
-}
-export interface SitterProfile extends SitterResult {
-    fullBio?: string;
-    reviews: Review[];
-    certifications: string[];
-    homeInfo?: string;
-    acceptedPetTypes: string[];
-    acceptedPetSizes: string[];
-    responseRate?: string;
-    responseTime?: string;
-}
-export interface Review {
-    authorName: string;
-    rating: number;
-    date: string;
-    text: string;
+export interface InboxThread {
+    threadId: string;
+    ownerName: string;
     petName?: string;
+    lastMessage: string;
+    lastMessageTime: string;
+    isUnread: boolean;
     serviceType?: string;
+    dates?: string;
+    threadUrl: string;
 }
-export interface BookingRequest {
-    sitterId: string;
-    serviceType: string;
-    startDate: string;
-    endDate: string;
-    petIds: string[];
-    message?: string;
-}
-export interface Booking {
-    id: string;
-    sitterName: string;
-    sitterId: string;
-    serviceType: string;
-    startDate: string;
-    endDate: string;
-    status: "pending" | "confirmed" | "completed" | "cancelled";
-    totalPrice: number;
-    pets: string[];
-}
-export interface Message {
-    id: string;
-    senderId: string;
-    senderName: string;
+export interface ThreadMessage {
+    sender: string;
     text: string;
     timestamp: string;
-    isRead: boolean;
+    isOwner: boolean;
 }
-export interface Pet {
-    id: string;
-    name: string;
-    species: "dog" | "cat" | "other";
-    breed?: string;
-    age?: number;
-    weight?: number;
-    size?: "small" | "medium" | "large" | "giant";
-    temperament?: string;
-    specialNeeds?: string;
-    vaccinated?: boolean;
-    spayedNeutered?: boolean;
-    profilePhotoUrl?: string;
+export interface InboxPollResult {
+    newThreads: InboxThread[];
+    updatedThreads: InboxThread[];
+    timestamp: string;
+}
+export interface SitterStats {
+    responseRate?: string;
+    responseTime?: string;
+    bookingRate?: string;
+    repeatScore?: string;
+    reviewAverage?: string;
+    reviewCount?: number;
+    isStarSitter?: boolean;
 }
 export declare class RoverBrowser {
     private browser;
@@ -91,40 +41,27 @@ export declare class RoverBrowser {
     private page;
     private session;
     private readonly BASE_URL;
+    private knownThreadIds;
+    private lastPollTime;
+    /**
+     * Launch browser with stealth configuration.
+     * Mirrors LinkedIn anti-detection: real fingerprint, no webdriver leak,
+     * cookie persistence, randomized viewport.
+     */
     initialize(headless?: boolean): Promise<void>;
     close(): Promise<void>;
     private ensurePage;
+    private ensureLoggedIn;
     login(email: string, password: string): Promise<RoverSession>;
-    searchSitters(params: SitterSearchParams): Promise<SitterResult[]>;
-    getSitterProfile(profileUrlOrId: string): Promise<SitterProfile>;
-    searchServices(location: string): Promise<Array<{
-        type: string;
-        description: string;
-        availableCount: number;
-    }>>;
-    requestBooking(request: BookingRequest): Promise<{
-        success: boolean;
-        bookingId?: string;
-        message: string;
-    }>;
-    getBookings(): Promise<Booking[]>;
-    messageSitter(sitterId: string, message: string): Promise<{
-        success: boolean;
-        messageId?: string;
-    }>;
-    getMessages(sitterId?: string): Promise<Message[]>;
-    addPetProfile(pet: Omit<Pet, "id">): Promise<{
-        success: boolean;
-        petId?: string;
-    }>;
-    updatePetProfile(petId: string, updates: Partial<Pet>): Promise<{
+    getInboxThreads(): Promise<InboxThread[]>;
+    getThreadMessages(threadUrl: string): Promise<ThreadMessage[]>;
+    pollInbox(): Promise<InboxPollResult>;
+    replyToThread(threadUrl: string, message: string): Promise<{
         success: boolean;
     }>;
-    getPets(): Promise<Pet[]>;
-    leaveReview(bookingId: string, rating: number, text: string): Promise<{
-        success: boolean;
-    }>;
-    getFavorites(): Promise<SitterResult[]>;
+    getSitterStats(): Promise<SitterStats>;
+    private humanScroll;
     getSession(): RoverSession;
+    getNextPollInterval(): number;
 }
 //# sourceMappingURL=browser.d.ts.map

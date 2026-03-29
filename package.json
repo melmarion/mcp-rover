@@ -1,11 +1,11 @@
 {
-  "name": "@striderlabs/mcp-rover",
-  "version": "1.0.0",
-  "description": "Model Context Protocol connector for Rover pet services",
+  "name": "mcp-rover-sitter",
+  "version": "2.0.0",
+  "description": "Sitter-side MCP connector for Rover — inbox monitoring, auto-reply, performance tracking. Stealth Playwright with anti-detection.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "mcp-rover": "dist/index.js"
+    "mcp-rover-sitter": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -17,11 +17,13 @@
     "mcp",
     "model-context-protocol",
     "rover",
-    "pet-services",
     "pet-sitting",
-    "dog-walking"
+    "sitter",
+    "inbox",
+    "auto-reply",
+    "stealth"
   ],
-  "author": "Strider Labs",
+  "author": "melmarion",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

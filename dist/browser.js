@@ -2,24 +2,65 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RoverBrowser = void 0;
 const playwright_1 = require("playwright");
+const stealth_js_1 = require("./stealth.js");
+// ── Sitter-side browser with full stealth ────────────────────────────────────
 class RoverBrowser {
     browser = null;
     context = null;
     page = null;
-    session = { isLoggedIn: false };
+    session = { isLoggedIn: false, isSitter: false };
     BASE_URL = "https://www.rover.com";
+    knownThreadIds = new Set();
+    lastPollTime = null;
+    /**
+     * Launch browser with stealth configuration.
+     * Mirrors LinkedIn anti-detection: real fingerprint, no webdriver leak,
+     * cookie persistence, randomized viewport.
+     */
     async initialize(headless = true) {
+        const profile = (0, stealth_js_1.randomProfile)();
         this.browser = await playwright_1.chromium.launch({
             headless,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1440,900",
+            ],
         });
         this.context = await this.browser.newContext({
-            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport: { width: 1280, height: 800 },
+            userAgent: profile.userAgent,
+            viewport: profile.viewport,
+            locale: "en-US",
+            timezoneId: "America/Los_Angeles",
+            geolocation: { latitude: 37.7749, longitude: -122.4194 },
+            permissions: ["geolocation"],
+            screen: {
+                width: profile.viewport.width,
+                height: profile.viewport.height,
+            },
         });
+        // Inject stealth patches before any page loads
+        await this.context.addInitScript(stealth_js_1.STEALTH_INIT_SCRIPT);
         this.page = await this.context.newPage();
+        // Try to restore saved session
+        const restored = await (0, stealth_js_1.loadCookies)(this.context);
+        if (restored) {
+            await this.page.goto(`${this.BASE_URL}/account/`, {
+                waitUntil: "domcontentloaded",
+            });
+            await (0, stealth_js_1.humanDelay)(1500);
+            const url = this.page.url();
+            if (!url.includes("/login") && !url.includes("/signin")) {
+                this.session = { isLoggedIn: true, isSitter: true };
+            }
+        }
     }
     async close() {
+        if (this.context && this.session.isLoggedIn) {
+            await (0, stealth_js_1.saveCookies)(this.context);
+        }
         if (this.page)
             await this.page.close();
         if (this.context)
@@ -35,420 +76,241 @@ class RoverBrowser {
             throw new Error("Browser not initialized. Call initialize() first.");
         return this.page;
     }
+    ensureLoggedIn() {
+        if (!this.session.isLoggedIn) {
+            throw new Error("You must be logged in. Call login() first.");
+        }
+    }
+    // ── Authentication ───────────────────────────────────────────────────────
     async login(email, password) {
         const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/login/`);
-        await page.waitForLoadState("networkidle");
-        await page.fill('input[name="email"], input[type="email"]', email);
-        await page.fill('input[name="password"], input[type="password"]', password);
-        await page.click('button[type="submit"], input[type="submit"]');
-        await page.waitForLoadState("networkidle");
+        await page.goto(`${this.BASE_URL}/login/`, {
+            waitUntil: "domcontentloaded",
+        });
+        await (0, stealth_js_1.humanDelay)(2000, 0.4);
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(500, 1500));
+        const emailSelector = 'input[name="email"], input[type="email"]';
+        await page.waitForSelector(emailSelector, { timeout: 10000 });
+        await (0, stealth_js_1.humanType)(page, emailSelector, email);
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(300, 800));
+        const passSelector = 'input[name="password"], input[type="password"]';
+        await (0, stealth_js_1.humanType)(page, passSelector, password);
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(400, 1000));
+        const submitSelector = 'button[type="submit"], input[type="submit"]';
+        await (0, stealth_js_1.humanClick)(page, submitSelector);
+        await page.waitForLoadState("domcontentloaded");
+        await (0, stealth_js_1.humanDelay)(3000, 0.3);
         const url = page.url();
-        const loggedIn = !url.includes("/login") &&
-            !url.includes("/signin") &&
-            (url.includes("/dashboard") ||
-                url.includes("/account") ||
-                url === `${this.BASE_URL}/` ||
-                !url.includes("login"));
+        const loggedIn = !url.includes("/login") && !url.includes("/signin");
+        if (loggedIn && this.context) {
+            await (0, stealth_js_1.saveCookies)(this.context);
+        }
         this.session = {
             isLoggedIn: loggedIn,
             email: loggedIn ? email : undefined,
+            isSitter: loggedIn,
         };
         return this.session;
     }
-    async searchSitters(params) {
+    // ── Inbox monitoring (sitter side) ───────────────────────────────────────
+    async getInboxThreads() {
+        this.ensureLoggedIn();
         const page = this.ensurePage();
-        const serviceMap = {
-            boarding: "boarding",
-            house_sitting: "house-sitting",
-            drop_in: "drop-in-visits",
-            doggy_day_care: "doggy-day-care",
-            dog_walking: "dog-walking",
-        };
-        const service = serviceMap[params.serviceType] || "boarding";
-        const encodedLocation = encodeURIComponent(params.location);
-        let url = `${this.BASE_URL}/search/results/?service_type=${service}&location=${encodedLocation}`;
-        if (params.startDate)
-            url += `&start_date=${params.startDate}`;
-        if (params.endDate)
-            url += `&end_date=${params.endDate}`;
-        if (params.petCount)
-            url += `&dog_count=${params.petCount}`;
-        await page.goto(url);
-        await page.waitForLoadState("networkidle");
-        const sitters = await page.evaluate(() => {
-            const results = [];
-            const cards = document.querySelectorAll('[data-testid="sitter-card"], .sitter-card, article[class*="sitter"], [class*="SearchResult"]');
-            cards.forEach((card, index) => {
-                if (index >= 20)
-                    return;
-                const nameEl = card.querySelector('[class*="sitter-name"], [class*="SitterName"], h3, h2');
-                const ratingEl = card.querySelector('[class*="rating"], [aria-label*="rating"], [class*="Rating"]');
-                const reviewEl = card.querySelector('[class*="review"], [class*="Review"]');
-                const priceEl = card.querySelector('[class*="price"], [class*="Price"]');
-                const locationEl = card.querySelector('[class*="location"], [class*="Location"]');
-                const linkEl = card.querySelector("a[href*='/sitters/'], a[href*='/dog-boarding/']");
-                const imgEl = card.querySelector("img");
-                const summaryEl = card.querySelector('[class*="summary"], [class*="Summary"], p');
-                const ratingText = ratingEl?.textContent?.trim() || "0";
-                const reviewText = reviewEl?.textContent?.replace(/[^\d]/g, "") || "0";
-                const priceText = priceEl?.textContent?.replace(/[^\d.]/g, "") || "0";
-                if (nameEl?.textContent?.trim()) {
-                    results.push({
-                        id: `sitter-${index}`,
-                        name: nameEl.textContent.trim(),
-                        location: locationEl?.textContent?.trim() || "",
-                        rating: parseFloat(ratingText) || 0,
-                        reviewCount: parseInt(reviewText, 10) || 0,
-                        price: parseFloat(priceText) || 0,
-                        priceUnit: "night",
-                        services: [],
-                        profileUrl: linkEl?.href || "",
-                        avatarUrl: imgEl?.src,
-                        summary: summaryEl?.textContent?.trim(),
-                    });
-                }
-            });
-            return results;
+        await page.goto(`${this.BASE_URL}/dashboard/messages/`, {
+            waitUntil: "domcontentloaded",
         });
-        return sitters.map((s, i) => ({
-            ...s,
-            id: s.id || `sitter-${i}`,
-        }));
-    }
-    async getSitterProfile(profileUrlOrId) {
-        const page = this.ensurePage();
-        const url = profileUrlOrId.startsWith("http")
-            ? profileUrlOrId
-            : `${this.BASE_URL}/sitters/${profileUrlOrId}/`;
-        await page.goto(url);
-        await page.waitForLoadState("networkidle");
-        const profile = await page.evaluate(() => {
-            const nameEl = document.querySelector('h1[class*="name"], [class*="sitter-name"], h1');
-            const ratingEl = document.querySelector('[class*="rating"], [aria-label*="rating"]');
-            const reviewCountEl = document.querySelector('[class*="review-count"], [class*="ReviewCount"]');
-            const locationEl = document.querySelector('[class*="location"], address');
-            const bioEl = document.querySelector('[class*="bio"], [class*="Bio"], [class*="about"]');
-            const priceEl = document.querySelector('[class*="price"], [class*="Price"]');
-            const responseRateEl = document.querySelector('[class*="response-rate"]');
-            const responseTimeEl = document.querySelector('[class*="response-time"]');
-            const reviewEls = document.querySelectorAll('[class*="review-item"], [class*="ReviewItem"], [class*="review"]');
-            const reviews = [];
-            reviewEls.forEach((el, i) => {
-                if (i >= 10)
-                    return;
-                const author = el.querySelector('[class*="author"], [class*="Author"]');
-                const rating = el.querySelector('[class*="rating"], [class*="Rating"]');
-                const date = el.querySelector('[class*="date"], time');
-                const text = el.querySelector('[class*="text"], [class*="comment"], p');
-                if (author?.textContent?.trim() || text?.textContent?.trim()) {
-                    reviews.push({
-                        authorName: author?.textContent?.trim() || "Anonymous",
-                        rating: parseFloat(rating?.textContent?.trim() || "5") || 5,
-                        date: date?.textContent?.trim() || date?.dateTime || "",
-                        text: text?.textContent?.trim() || "",
-                    });
-                }
-            });
-            return {
-                id: window.location.pathname.split("/").filter(Boolean).pop() || "",
-                name: nameEl?.textContent?.trim() || "",
-                location: locationEl?.textContent?.trim() || "",
-                rating: parseFloat(ratingEl?.textContent?.trim() || "0") || 0,
-                reviewCount: parseInt(reviewCountEl?.textContent?.replace(/[^\d]/g, "") || "0", 10) || 0,
-                price: parseFloat(priceEl?.textContent?.replace(/[^\d.]/g, "") || "0") || 0,
-                priceUnit: "night",
-                services: [],
-                profileUrl: window.location.href,
-                fullBio: bioEl?.textContent?.trim(),
-                reviews,
-                certifications: [],
-                acceptedPetTypes: ["dog"],
-                acceptedPetSizes: [],
-                responseRate: responseRateEl?.textContent?.trim(),
-                responseTime: responseTimeEl?.textContent?.trim(),
-            };
-        });
-        return profile;
-    }
-    async searchServices(location) {
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/`);
-        await page.waitForLoadState("networkidle");
-        return [
-            { type: "boarding", description: "Your dog stays at the sitter's home", availableCount: 0 },
-            { type: "house_sitting", description: "Sitter stays in your home", availableCount: 0 },
-            { type: "drop_in", description: "Sitter visits your home for 30-60 minutes", availableCount: 0 },
-            { type: "doggy_day_care", description: "Your dog spends the day at the sitter's home", availableCount: 0 },
-            { type: "dog_walking", description: "Sitter takes your dog for a walk", availableCount: 0 },
-        ];
-    }
-    async requestBooking(request) {
-        if (!this.session.isLoggedIn) {
-            return { success: false, message: "You must be logged in to request a booking." };
-        }
-        const page = this.ensurePage();
-        const sitterUrl = request.sitterId.startsWith("http")
-            ? request.sitterId
-            : `${this.BASE_URL}/sitters/${request.sitterId}/`;
-        await page.goto(sitterUrl);
-        await page.waitForLoadState("networkidle");
-        const requestBtn = page.locator('button:has-text("Request"), a:has-text("Book"), button:has-text("Book")').first();
-        if (await requestBtn.isVisible()) {
-            await requestBtn.click();
-            await page.waitForLoadState("networkidle");
-        }
-        const startInput = page.locator('input[name*="start"], input[placeholder*="start"]').first();
-        if (await startInput.isVisible()) {
-            await startInput.fill(request.startDate);
-        }
-        const endInput = page.locator('input[name*="end"], input[placeholder*="end"]').first();
-        if (await endInput.isVisible()) {
-            await endInput.fill(request.endDate);
-        }
-        if (request.message) {
-            const msgInput = page.locator('textarea[name*="message"], textarea[placeholder*="message"]').first();
-            if (await msgInput.isVisible()) {
-                await msgInput.fill(request.message);
-            }
-        }
-        return {
-            success: true,
-            message: "Booking request initiated. Please complete on Rover.com.",
-        };
-    }
-    async getBookings() {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to view bookings.");
-        }
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/dashboard/bookings/`);
-        await page.waitForLoadState("networkidle");
-        const bookings = await page.evaluate(() => {
+        await (0, stealth_js_1.humanWaitForLoad)(page);
+        await this.humanScroll(page, (0, stealth_js_1.randInt)(2, 4));
+        const threads = await page.evaluate(() => {
             const items = [];
-            const cards = document.querySelectorAll('[class*="booking-card"], [class*="BookingCard"], [data-testid*="booking"]');
-            cards.forEach((card, i) => {
-                const sitterEl = card.querySelector('[class*="sitter"], h3, h2');
-                const datesEl = card.querySelector('[class*="dates"], [class*="Dates"]');
-                const statusEl = card.querySelector('[class*="status"], [class*="Status"]');
-                const priceEl = card.querySelector('[class*="price"], [class*="Price"]');
-                items.push({
-                    id: `booking-${i}`,
-                    sitterName: sitterEl?.textContent?.trim() || "",
-                    sitterId: "",
-                    serviceType: "boarding",
-                    startDate: datesEl?.textContent?.split("-")[0]?.trim() || "",
-                    endDate: datesEl?.textContent?.split("-")[1]?.trim() || "",
-                    status: (statusEl?.textContent?.trim() || "pending"),
-                    totalPrice: parseFloat(priceEl?.textContent?.replace(/[^\d.]/g, "") || "0") || 0,
-                    pets: [],
-                });
+            const threadEls = document.querySelectorAll('[class*="conversation"], [class*="Conversation"], ' +
+                '[class*="message-thread"], [class*="MessageThread"], ' +
+                '[class*="inbox-item"], [class*="InboxItem"], ' +
+                '[data-testid*="conversation"], [data-testid*="message"]');
+            threadEls.forEach((el, i) => {
+                if (i >= 30)
+                    return;
+                const nameEl = el.querySelector('[class*="name"], [class*="Name"], [class*="sender"], h3, h4');
+                const previewEl = el.querySelector('[class*="preview"], [class*="Preview"], [class*="snippet"], [class*="last-message"], p');
+                const timeEl = el.querySelector('time, [class*="time"], [class*="Time"], [class*="date"], [class*="Date"]');
+                const linkEl = el.querySelector("a");
+                const isUnread = el.classList.toString().toLowerCase().includes("unread") ||
+                    el.querySelector('[class*="unread"], [class*="Unread"], [class*="badge"]') !== null;
+                const href = linkEl?.href || "";
+                const threadId = href.split("/").filter(Boolean).pop() || `thread-${i}`;
+                if (nameEl?.textContent?.trim()) {
+                    items.push({
+                        threadId,
+                        ownerName: nameEl.textContent.trim(),
+                        lastMessage: previewEl?.textContent?.trim() || "",
+                        lastMessageTime: timeEl?.dateTime ||
+                            timeEl?.textContent?.trim() || "",
+                        isUnread,
+                        threadUrl: href,
+                    });
+                }
             });
             return items;
         });
-        return bookings;
+        return threads;
     }
-    async messageSitter(sitterId, message) {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to send messages.");
-        }
+    async getThreadMessages(threadUrl) {
+        this.ensureLoggedIn();
         const page = this.ensurePage();
-        const sitterUrl = sitterId.startsWith("http")
-            ? sitterId
-            : `${this.BASE_URL}/sitters/${sitterId}/`;
-        await page.goto(sitterUrl);
-        await page.waitForLoadState("networkidle");
-        const contactBtn = page.locator('button:has-text("Contact"), button:has-text("Message"), a:has-text("Contact")').first();
-        if (await contactBtn.isVisible()) {
-            await contactBtn.click();
-            await page.waitForLoadState("networkidle");
-        }
-        const textarea = page.locator("textarea").first();
-        if (await textarea.isVisible()) {
-            await textarea.fill(message);
-            const sendBtn = page.locator('button[type="submit"], button:has-text("Send")').first();
-            if (await sendBtn.isVisible()) {
-                await sendBtn.click();
-                await page.waitForLoadState("networkidle");
-                return { success: true };
-            }
-        }
-        return { success: false };
-    }
-    async getMessages(sitterId) {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to view messages.");
-        }
-        const page = this.ensurePage();
-        if (sitterId) {
-            await page.goto(`${this.BASE_URL}/dashboard/messages/${sitterId}/`);
-        }
-        else {
-            await page.goto(`${this.BASE_URL}/dashboard/messages/`);
-        }
-        await page.waitForLoadState("networkidle");
+        const url = threadUrl.startsWith("http")
+            ? threadUrl
+            : `${this.BASE_URL}/dashboard/messages/${threadUrl}/`;
+        await page.goto(url, { waitUntil: "domcontentloaded" });
+        await (0, stealth_js_1.humanWaitForLoad)(page);
         const messages = await page.evaluate(() => {
             const items = [];
-            const msgEls = document.querySelectorAll('[class*="message-item"], [class*="MessageItem"], [class*="chat-message"]');
-            msgEls.forEach((el, i) => {
-                const sender = el.querySelector('[class*="sender"], [class*="Sender"]');
-                const text = el.querySelector('[class*="text"], [class*="body"], p');
-                const time = el.querySelector('time, [class*="time"]');
+            const msgEls = document.querySelectorAll('[class*="message-item"], [class*="MessageItem"], ' +
+                '[class*="chat-message"], [class*="ChatMessage"], ' +
+                '[class*="message-bubble"], [class*="MessageBubble"]');
+            msgEls.forEach((el) => {
+                const sender = el.querySelector('[class*="sender"], [class*="Sender"], [class*="author"], [class*="name"]');
+                const text = el.querySelector('[class*="text"], [class*="body"], [class*="content"], p');
+                const time = el.querySelector('time, [class*="time"], [class*="timestamp"]');
+                const classes = el.classList.toString().toLowerCase();
+                const isOwner = classes.includes("received") ||
+                    classes.includes("incoming") ||
+                    classes.includes("other") ||
+                    classes.includes("left") ||
+                    (!classes.includes("sent") && !classes.includes("outgoing") && !classes.includes("self"));
                 items.push({
-                    id: `msg-${i}`,
-                    senderId: "",
-                    senderName: sender?.textContent?.trim() || "",
+                    sender: sender?.textContent?.trim() || (isOwner ? "Owner" : "You"),
                     text: text?.textContent?.trim() || "",
                     timestamp: time?.dateTime ||
-                        time?.textContent?.trim() ||
-                        "",
-                    isRead: !el.classList.toString().includes("unread"),
+                        time?.textContent?.trim() || "",
+                    isOwner,
                 });
             });
             return items;
         });
         return messages;
     }
-    async addPetProfile(pet) {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to add a pet.");
-        }
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/account/pets/new/`);
-        await page.waitForLoadState("networkidle");
-        const nameInput = page.locator('input[name="name"], input[placeholder*="name"]').first();
-        if (await nameInput.isVisible()) {
-            await nameInput.fill(pet.name);
-        }
-        if (pet.breed) {
-            const breedInput = page.locator('input[name="breed"]').first();
-            if (await breedInput.isVisible())
-                await breedInput.fill(pet.breed);
-        }
-        const submitBtn = page.locator('button[type="submit"]').first();
-        if (await submitBtn.isVisible()) {
-            await submitBtn.click();
-            await page.waitForLoadState("networkidle");
-            return { success: true };
-        }
-        return { success: false };
-    }
-    async updatePetProfile(petId, updates) {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to update a pet profile.");
-        }
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/account/pets/${petId}/edit/`);
-        await page.waitForLoadState("networkidle");
-        if (updates.name) {
-            const nameInput = page.locator('input[name="name"]').first();
-            if (await nameInput.isVisible())
-                await nameInput.fill(updates.name);
-        }
-        if (updates.specialNeeds) {
-            const needsInput = page.locator('textarea[name*="special"], textarea[name*="needs"]').first();
-            if (await needsInput.isVisible())
-                await needsInput.fill(updates.specialNeeds);
-        }
-        const submitBtn = page.locator('button[type="submit"]').first();
-        if (await submitBtn.isVisible()) {
-            await submitBtn.click();
-            await page.waitForLoadState("networkidle");
-            return { success: true };
-        }
-        return { success: false };
-    }
-    async getPets() {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to view pets.");
-        }
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/account/pets/`);
-        await page.waitForLoadState("networkidle");
-        const pets = await page.evaluate(() => {
-            const items = [];
-            const petCards = document.querySelectorAll('[class*="pet-card"], [class*="PetCard"], [data-testid*="pet"]');
-            petCards.forEach((card, i) => {
-                const nameEl = card.querySelector('[class*="name"], h3, h2');
-                const breedEl = card.querySelector('[class*="breed"]');
-                const ageEl = card.querySelector('[class*="age"]');
-                const imgEl = card.querySelector("img");
-                const link = card.querySelector("a");
-                const petId = link?.getAttribute("href")?.split("/").filter(Boolean).pop() || `pet-${i}`;
-                items.push({
-                    id: petId,
-                    name: nameEl?.textContent?.trim() || "",
-                    species: "dog",
-                    breed: breedEl?.textContent?.trim(),
-                    age: ageEl ? parseInt(ageEl.textContent?.replace(/[^\d]/g, "") || "0", 10) : undefined,
-                    weight: undefined,
-                    profilePhotoUrl: imgEl?.src,
-                });
-            });
-            return items;
-        });
-        return pets;
-    }
-    async leaveReview(bookingId, rating, text) {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to leave a review.");
-        }
-        const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/dashboard/bookings/${bookingId}/review/`);
-        await page.waitForLoadState("networkidle");
-        const starEl = page.locator(`[data-rating="${rating}"], [aria-label="${rating} stars"]`).first();
-        if (await starEl.isVisible())
-            await starEl.click();
-        const textArea = page.locator("textarea").first();
-        if (await textArea.isVisible()) {
-            await textArea.fill(text);
-            const submitBtn = page.locator('button[type="submit"]').first();
-            if (await submitBtn.isVisible()) {
-                await submitBtn.click();
-                await page.waitForLoadState("networkidle");
-                return { success: true };
+    async pollInbox() {
+        const threads = await this.getInboxThreads();
+        const now = new Date().toISOString();
+        const newThreads = [];
+        const updatedThreads = [];
+        for (const thread of threads) {
+            if (!this.knownThreadIds.has(thread.threadId)) {
+                newThreads.push(thread);
+                this.knownThreadIds.add(thread.threadId);
+            }
+            else if (thread.isUnread) {
+                updatedThreads.push(thread);
             }
         }
-        return { success: false };
+        this.lastPollTime = now;
+        return { newThreads, updatedThreads, timestamp: now };
     }
-    async getFavorites() {
-        if (!this.session.isLoggedIn) {
-            throw new Error("You must be logged in to view favorites.");
-        }
+    // ── Reply to owner ───────────────────────────────────────────────────────
+    async replyToThread(threadUrl, message) {
+        this.ensureLoggedIn();
         const page = this.ensurePage();
-        await page.goto(`${this.BASE_URL}/account/favorites/`);
-        await page.waitForLoadState("networkidle");
-        const favorites = await page.evaluate(() => {
-            const items = [];
-            const cards = document.querySelectorAll('[class*="sitter-card"], [class*="favorite"], article');
-            cards.forEach((card, i) => {
-                const nameEl = card.querySelector('h3, h2, [class*="name"]');
-                const ratingEl = card.querySelector('[class*="rating"]');
-                const priceEl = card.querySelector('[class*="price"]');
-                const locationEl = card.querySelector('[class*="location"]');
-                const linkEl = card.querySelector("a");
-                const imgEl = card.querySelector("img");
-                if (nameEl?.textContent?.trim()) {
-                    items.push({
-                        id: `fav-${i}`,
-                        name: nameEl.textContent.trim(),
-                        location: locationEl?.textContent?.trim() || "",
-                        rating: parseFloat(ratingEl?.textContent?.trim() || "0") || 0,
-                        reviewCount: 0,
-                        price: parseFloat(priceEl?.textContent?.replace(/[^\d.]/g, "") || "0") || 0,
-                        priceUnit: "night",
-                        services: [],
-                        profileUrl: linkEl?.href || "",
-                        avatarUrl: imgEl?.src,
-                    });
-                }
-            });
-            return items;
+        const url = threadUrl.startsWith("http")
+            ? threadUrl
+            : `${this.BASE_URL}/dashboard/messages/${threadUrl}/`;
+        await page.goto(url, { waitUntil: "domcontentloaded" });
+        await (0, stealth_js_1.humanWaitForLoad)(page);
+        // Simulate reading the conversation (human behavior)
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(3000, 6000), 0.3);
+        // Scroll to bottom
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(800, 1500));
+        // Find reply textarea
+        const textareaSelector = 'textarea, [contenteditable="true"], ' +
+            '[class*="reply"] textarea, [class*="Reply"] textarea, ' +
+            '[class*="compose"] textarea, [class*="Compose"] textarea, ' +
+            '[data-testid*="reply"], [data-testid*="message-input"]';
+        const textarea = page.locator(textareaSelector).first();
+        const isVisible = await textarea.isVisible().catch(() => false);
+        if (!isVisible) {
+            const replyBtn = page.locator('button:has-text("Reply"), button:has-text("Message"), ' +
+                'a:has-text("Reply"), [class*="reply-button"]').first();
+            if (await replyBtn.isVisible().catch(() => false)) {
+                await (0, stealth_js_1.humanClick)(page, 'button:has-text("Reply"), button:has-text("Message")');
+                await (0, stealth_js_1.humanDelay)(1000);
+            }
+        }
+        // Type reply with human timing
+        try {
+            await (0, stealth_js_1.humanType)(page, textareaSelector, message);
+        }
+        catch {
+            await textarea.click();
+            await (0, stealth_js_1.humanDelay)(300);
+            for (const char of message) {
+                await page.keyboard.type(char, { delay: 0 });
+                await new Promise((r) => setTimeout(r, (0, stealth_js_1.randInt)(30, 90)));
+            }
+        }
+        // Pause before sending (human reads what they typed)
+        await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(1500, 3500), 0.3);
+        // Send
+        const sendSelector = 'button[type="submit"], button:has-text("Send"), ' +
+            '[class*="send-button"], [class*="SendButton"], ' +
+            '[data-testid*="send"]';
+        const sendBtn = page.locator(sendSelector).first();
+        if (await sendBtn.isVisible().catch(() => false)) {
+            await (0, stealth_js_1.humanClick)(page, sendSelector);
+            await page.waitForLoadState("domcontentloaded").catch(() => { });
+            await (0, stealth_js_1.humanDelay)(2000, 0.3);
+            if (this.context)
+                await (0, stealth_js_1.saveCookies)(this.context);
+            return { success: true };
+        }
+        // Fallback: Enter key
+        await page.keyboard.press("Enter");
+        await (0, stealth_js_1.humanDelay)(2000);
+        if (this.context)
+            await (0, stealth_js_1.saveCookies)(this.context);
+        return { success: true };
+    }
+    // ── Sitter dashboard stats ───────────────────────────────────────────────
+    async getSitterStats() {
+        this.ensureLoggedIn();
+        const page = this.ensurePage();
+        await page.goto(`${this.BASE_URL}/dashboard/`, {
+            waitUntil: "domcontentloaded",
         });
-        return favorites;
+        await (0, stealth_js_1.humanWaitForLoad)(page);
+        const stats = await page.evaluate(() => {
+            const getText = (selectors) => {
+                for (const sel of selectors.split(",")) {
+                    const el = document.querySelector(sel.trim());
+                    if (el?.textContent?.trim())
+                        return el.textContent.trim();
+                }
+                return undefined;
+            };
+            return {
+                responseRate: getText('[class*="response-rate"], [class*="ResponseRate"], [data-testid*="response-rate"]'),
+                responseTime: getText('[class*="response-time"], [class*="ResponseTime"], [data-testid*="response-time"]'),
+                bookingRate: getText('[class*="booking-rate"], [class*="BookingRate"], [data-testid*="booking-rate"], [class*="booking-score"]'),
+                repeatScore: getText('[class*="repeat"], [class*="Repeat"], [data-testid*="repeat"]'),
+                reviewAverage: getText('[class*="rating"], [class*="Rating"], [class*="review-average"], [class*="star-rating"]'),
+                isStarSitter: document.querySelector('[class*="star-sitter"], [class*="StarSitter"], [alt*="Star Sitter"], [title*="Star Sitter"]') !== null,
+            };
+        });
+        return stats;
+    }
+    // ── Utility ──────────────────────────────────────────────────────────────
+    async humanScroll(page, times) {
+        for (let i = 0; i < times; i++) {
+            const distance = (0, stealth_js_1.randInt)(200, 500);
+            await page.mouse.wheel(0, distance);
+            await (0, stealth_js_1.humanDelay)((0, stealth_js_1.randInt)(800, 2000), 0.4);
+        }
     }
     getSession() {
         return this.session;
+    }
+    getNextPollInterval() {
+        const baseMs = (0, stealth_js_1.randInt)(180_000, 480_000); // 3-8 minutes
+        return (0, stealth_js_1.nextPollInterval)(baseMs);
     }
 }
 exports.RoverBrowser = RoverBrowser;
