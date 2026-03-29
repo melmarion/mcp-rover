@@ -297,6 +297,53 @@ class RoverBrowser {
         });
         return stats;
     }
+    // ── Returning client detection ────────────────────────────────────────────
+    /**
+     * Check if an owner has messaged/booked with Marion before.
+     * Scans full inbox for threads with the same owner name,
+     * and checks current thread messages for returning-client signals.
+     */
+    async checkReturningClient(ownerName, currentThreadUrl) {
+        this.ensureLoggedIn();
+        // 1. Get all inbox threads and check for name matches
+        const allThreads = await this.getInboxThreads();
+        const matchedThreads = [];
+        const normalizedOwner = ownerName.toLowerCase().trim();
+        for (const thread of allThreads) {
+            const normalizedThread = thread.ownerName.toLowerCase().trim();
+            // Match if same name but different thread
+            if (normalizedThread === normalizedOwner &&
+                thread.threadUrl !== currentThreadUrl &&
+                !thread.threadUrl.endsWith(currentThreadUrl)) {
+                matchedThreads.push(thread.threadUrl);
+            }
+        }
+        // 2. Check current thread messages for returning-client signals
+        const messages = await this.getThreadMessages(currentThreadUrl);
+        const ownerText = messages
+            .filter((m) => m.isOwner)
+            .map((m) => m.text)
+            .join(" ")
+            .toLowerCase();
+        const returningSignals = /\b(?:again|back|another stay|last time|like before|returning|booked before|used you|previous|repeat|re-?book)\b/i;
+        const hasReturningSignals = returningSignals.test(ownerText);
+        // 3. Determine confidence
+        let confidence = "low";
+        if (matchedThreads.length > 0 && hasReturningSignals) {
+            confidence = "high";
+        }
+        else if (matchedThreads.length > 0) {
+            confidence = "medium";
+        }
+        else if (hasReturningSignals) {
+            confidence = "medium";
+        }
+        return {
+            isReturning: matchedThreads.length > 0 || hasReturningSignals,
+            matchedThreads,
+            confidence,
+        };
+    }
     // ── Owner pet profile scraping ────────────────────────────────────────────
     /**
      * Scrape the owner's pet profile from their Rover account.

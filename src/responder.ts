@@ -55,6 +55,7 @@ export interface OwnerContext {
   messageCount: number;
   stage: ConversationStage;
   petProfiles: PetDetail[];
+  isReturning: boolean;
 }
 
 /** Extract owner context from conversation history. */
@@ -159,6 +160,7 @@ export function analyzeConversation(
     messageCount: ownerMessages.length,
     stage,
     petProfiles: [],
+    isReturning: /\b(?:again|back|another stay|last time|like before|returning|booked before|used you|previous|repeat|re-?book)\b/i.test(allOwnerText),
   };
 }
 
@@ -199,6 +201,15 @@ TECHNIQUES:
 
 ${ctx.isMultiPet ? 'If multiple pets mentioned, show enthusiasm not burden: "Three cats? That\'s not a house, that\'s a pride. I\'m in."' : ""}
 
+${ctx.isReturning ? `
+RETURNING CLIENT OVERRIDE:
+This owner has booked with you before. Skip the foot-in-the-door question. Go warm and familiar:
+"Hey [name]! Welcome back. Those dates work for me — same setup as last time, or anything different with [pet name] I should know about?"
+- Use their pet's name naturally (you already know it)
+- "Same setup as last time" presupposes continuity and shared history
+- Only ask about CHANGES, not basics — you already know their cat
+- Shorter message than a new client. They don't need convincing.
+` : ""}
 DO NOT:
 - List qualifications or experience
 - Mention your profile, reviews, or ratings
@@ -335,6 +346,11 @@ HUMOR MIRRORS (adapt to what they actually said):
 
 "THOSE DATES ARE HELD FOR YOU" — same as commitment stage. Reciprocity + soft scarcity + high agency.
 
+${ctx.isReturning ? `
+RETURNING CLIENT CLOSE — even shorter than normal:
+"I'm all set — dates are locked in for you."
+That's it. They know you. You know their cat. No selling needed.
+` : ""}
 DO NOT:
 - Add urgency
 - Recap qualifications
@@ -393,6 +409,7 @@ ${ctx.petProfiles.map((p) => `  - ${p.name}: ${[p.species, p.breed, p.age, p.wei
 - Mentioned price: ${ctx.mentionedPrice ? "yes" : "no"}
 - Mentioned other sitters: ${ctx.mentionedOtherSitters ? "yes" : "no"}
 - Mentioned meet & greet: ${ctx.mentionedMeetGreet ? "yes" : "no"}
+- Returning client: ${ctx.isReturning ? "YES — they have booked with you before" : "no"}
 - Conversation stage: ${ctx.stage}
 - Messages from owner: ${ctx.messageCount}
 
@@ -552,6 +569,16 @@ export function calculatePricing(
       originalRate: baseRate,
       offeredRate: baseRate,
       framing: "hold rate — competing on price signals low value, win on specificity and status",
+    };
+  }
+
+  // Returning client: hold rate, no status flip needed — they already chose you
+  if (ctx.isReturning) {
+    return {
+      shouldOffer: false,
+      originalRate: baseRate,
+      offeredRate: baseRate,
+      framing: "returning client — same rate as before, no negotiation needed",
     };
   }
 

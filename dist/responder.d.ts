@@ -45,6 +45,7 @@ export interface OwnerContext {
     messageCount: number;
     stage: ConversationStage;
     petProfiles: PetDetail[];
+    isReturning: boolean;
 }
 /** Extract owner context from conversation history. */
 export declare function analyzeConversation(messages: ThreadMessage[], ownerName: string): OwnerContext;

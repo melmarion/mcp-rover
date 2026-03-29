@@ -116,6 +116,25 @@ const tools: Tool[] = [
     },
   },
   {
+    name: "check_returning",
+    description:
+      "Check if an owner has messaged or booked with you before. Scans inbox for previous threads with the same name and checks current messages for returning-client signals (e.g. 'again', 'last time', 'another stay'). Returns confidence level.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ownerName: {
+          type: "string",
+          description: "Owner's name to search for in inbox history",
+        },
+        threadUrl: {
+          type: "string",
+          description: "Current thread URL or ID",
+        },
+      },
+      required: ["ownerName", "threadUrl"],
+    },
+  },
+  {
     name: "get_owner_pets",
     description:
       "Scrape the owner's pet profile from a conversation thread. Returns pet names, breeds, ages, temperament, special needs. Use this BEFORE drafting a reply — knowing the cat's name when the owner didn't mention it reads as 'she actually looked at my profile.'",
@@ -192,6 +211,11 @@ const ReadThreadSchema = z.object({
 const ReplySchema = z.object({
   threadUrl: z.string().min(1),
   message: z.string().min(1),
+});
+
+const CheckReturningSchema = z.object({
+  ownerName: z.string().min(1),
+  threadUrl: z.string().min(1),
 });
 
 const AnalyzeSchema = z.object({
@@ -370,6 +394,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "check_returning": {
+        const { ownerName, threadUrl } = CheckReturningSchema.parse(args);
+        const result = await browser.checkReturningClient(ownerName, threadUrl);
+        const lines = [
+          `**Returning client:** ${result.isReturning ? "YES" : "no"}`,
+          `**Confidence:** ${result.confidence}`,
+          result.matchedThreads.length > 0
+            ? `**Previous threads:** ${result.matchedThreads.length}\n${result.matchedThreads.map((t) => `  - ${t}`).join("\n")}`
+            : "**Previous threads:** none found in inbox",
+        ];
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      }
+
       case "get_owner_pets": {
         const { threadUrl } = ReadThreadSchema.parse(args);
         const profile = await browser.getOwnerPetProfile(threadUrl);
@@ -435,6 +472,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { threadUrl, ownerName, baseRate } = DraftReplySchema.parse(args);
         const messages = await browser.getThreadMessages(threadUrl);
 
+        // Check if this is a returning client before anything else
+        const returningCheck = await browser.checkReturningClient(ownerName, threadUrl);
+
         // Pull pet profile from Rover before analyzing — get names, breeds, details
         const petProfile = await browser.getOwnerPetProfile(threadUrl);
 
@@ -465,6 +505,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
+        // Override returning client detection if inbox scan found matches
+        if (returningCheck.isReturning) {
+          ctx.isReturning = true;
+        }
+
         const pricing = calculatePricing(ctx, baseRate || 99);
         const systemPrompt = buildSystemPrompt(ctx);
         const userPrompt = buildUserPrompt(messages, ctx);
@@ -479,6 +524,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const output = [
           `**Conversation stage:** ${ctx.stage}`,
+          `**Returning client:** ${ctx.isReturning ? `YES (confidence: ${returningCheck.confidence}, ${returningCheck.matchedThreads.length} previous threads)` : "no"}`,
           `**Pet profile (from Rover):** ${petProfileSummary}`,
           `**Pricing:** ${pricing.shouldOffer ? `offer $${pricing.offeredRate}/night — ${pricing.framing}` : `hold at $${pricing.originalRate}`}`,
           `**Detected:** pets=[${ctx.petNames.join(",")}] concerns=[${ctx.concerns.join(",")}] questions=[${ctx.questionsAsked.join(",")}]`,

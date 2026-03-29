@@ -46,6 +46,11 @@ export interface PetDetail {
     vaccinated?: boolean;
     photoUrl?: string;
 }
+export interface ReturningClientResult {
+    isReturning: boolean;
+    matchedThreads: string[];
+    confidence: "high" | "medium" | "low";
+}
 export interface SitterStats {
     responseRate?: string;
     responseTime?: string;
@@ -80,6 +85,12 @@ export declare class RoverBrowser {
         success: boolean;
     }>;
     getSitterStats(): Promise<SitterStats>;
+    /**
+     * Check if an owner has messaged/booked with Marion before.
+     * Scans full inbox for threads with the same owner name,
+     * and checks current thread messages for returning-client signals.
+     */
+    checkReturningClient(ownerName: string, currentThreadUrl: string): Promise<ReturningClientResult>;
     /**
      * Scrape the owner's pet profile from their Rover account.
      * Called from the message thread — Rover shows a link to the owner's
